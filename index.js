@@ -195,32 +195,44 @@ bot.on('message:text', async (ctx) => {
         }
     }
 
-    if (userStates[userId]?.state === 'awaiting_order_number') {
+    // if (userStates[userId]?.state === 'awaiting_order_number') {
+    //     const { data, error } = await supabase
+    //         .from('orders')
+    //         .select('status, id')
+    //         .eq('user_id', userId)
+    //         .eq('id', orderId);
+
+    //     if (error) {
+    //         await ctx.reply("Произошла ошибка при поиске ваших заказов.");
+    //     } else if (data.length === 0) {
+    //         await ctx.reply("Вы еще не сделали заказ. \nВы можете это сделать в нашем мини-приложении (доступно по нажатию на синюю иконку 'shop', слева от ввода сообщения. Спасибо, что выбрали SneakPick❤️");
+    //     } else {
+    //         const completedOrders = data.filter(order => order.status === 'выполнено');
+    //         const activeOrders = data.filter(order => order.status !== 'выполнено');
+
+    //         if (activeOrders.length > 0) {
+    //             const activeStatuses = activeOrders.map(order => `Статус вашего заказа (ID: ${order.id}): ${order.status}`).join('; ');
+    //             await ctx.reply(`${activeStatuses}. Также не забудьте оставить отзыв об уже выполненных заказах. \nСпасибо, что выбрали SneakPick❤️`);
+    //         } else if (completedOrders.length > 0) {
+    //             await ctx.reply("У вас нет активных заказов. Пожалуйста, не забудьте написать отзыв о полученных товарах. \nСпасибо, что выбрали SneakPick❤️️");
+    //         } else {
+    //             await ctx.reply("Ваши заказы находятся в обработке. \nСпасибо, что выбрали SneakPick❤️");
+    //         }
+    //     }
+
+    //     delete userStates[userId];
+    //     return;
+    // }
+
+    async function getActiveOrders(userId) {
         const { data, error } = await supabase
             .from('orders')
-            .select('status, id')
-            .eq('user_id', userId);
-
-        if (error) {
-            await ctx.reply("Произошла ошибка при поиске ваших заказов.");
-        } else if (data.length === 0) {
-            await ctx.reply("Вы еще не сделали заказ. \nВы можете это сделать в нашем мини-приложении (доступно по нажатию на синюю иконку 'shop', слева от ввода сообщения. Спасибо, что выбрали SneakPick❤️");
-        } else {
-            const completedOrders = data.filter(order => order.status === 'выполнено');
-            const activeOrders = data.filter(order => order.status !== 'выполнено');
-
-            if (activeOrders.length > 0) {
-                const activeStatuses = activeOrders.map(order => `Статус вашего заказа (ID: ${order.id}): ${order.status}`).join('; ');
-                await ctx.reply(`${activeStatuses}. Также не забудьте оставить отзыв об уже выполненных заказах. \nСпасибо, что выбрали SneakPick❤️`);
-            } else if (completedOrders.length > 0) {
-                await ctx.reply("У вас нет активных заказов. Пожалуйста, не забудьте написать отзыв о полученных товарах. \nСпасибо, что выбрали SneakPick❤️️");
-            } else {
-                await ctx.reply("Ваши заказы находятся в обработке. \nСпасибо, что выбрали SneakPick❤️");
-            }
-        }
-
-        delete userStates[userId];
-        return;
+            .select('id, status, created_at')
+            .eq('user_id', userId)
+            .neq('status', 'выполнено')
+            .order('created_at', { ascending: false });
+    
+        return { data, error };
     }
 
     switch (text) {
@@ -273,9 +285,34 @@ bot.on('message:text', async (ctx) => {
             break;
 
         case "🛒 Где мой заказ?":
-            await ctx.reply("Пожалуйста, укажите номер заказа.");
-            userStates[userId] = { state: 'awaiting_order_number' };
-            break;
+                try {
+                    const { data, error } = await getActiveOrders(ctx.from.id);
+                    
+                    if (error) throw error;
+                    
+                    if (data.length === 0) {
+                        await ctx.reply("🎉 У вас нет активных заказов!\nЗагляните в наш магазин - возможно, вас что-то заинтересует 😊");
+                        return;
+                    }
+            
+                    const ordersList = data.map((order, index) => 
+                        `📦 *Заказ #${index + 1}*\n` +
+                        `🆔 ID: ${order.id}\n` +
+                        `📊 Статус: ${order.status}\n` +
+                        `📅 Дата: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`
+                    ).join('\n\n');
+            
+                    await ctx.reply(
+                        `📬 *Ваши активные заказы:*\n\n${ordersList}\n\n` +
+                        `ℹ️ Обновления статусов будут приходить автоматически.`,
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (error) {
+                    console.error('Order check error:', error);
+                    await ctx.reply("⚠️ Произошла ошибка при получении информации о заказах. Попробуйте позже.");
+                }
+                break;
+
 
         default:
             const { error } = await saveUserMessage(userId, text, messageId);
