@@ -4,10 +4,9 @@ const { createClient } = require('@supabase/supabase-js');
 
 const bot = new Bot(process.env.BOT_API_KEY);
 
-// Используем service_role ключ для полного доступа к базе данных
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Подписка на изменения в таблице orders (без изменений)
+// Подписка на изменения в таблице orders
 const subscriptionOrders = supabase
     .channel('custom-insert-channel')
     .on(
@@ -26,7 +25,7 @@ const subscriptionOrders = supabase
     )
     .subscribe();
 
-// Подписка на новые сообщения от пользователей (user_messages)
+// Подписка на новые сообщения от пользователей
 const subscriptionUserMessages = supabase
     .channel('user-messages-channel')
     .on(
@@ -34,12 +33,11 @@ const subscriptionUserMessages = supabase
         { event: 'INSERT', schema: 'public', table: 'user_messages' },
         (payload) => {
             console.log('Новое сообщение от пользователя:', payload.new);
-            // Здесь можно добавить уведомление админов, если нужно
         }
     )
     .subscribe();
 
-// Подписка на новые сообщения от админов (admin_messages)
+// Подписка на новые сообщения от админов 
 const subscriptionAdminMessages = supabase
     .channel('admin-messages-channel')
     .on(
@@ -48,7 +46,7 @@ const subscriptionAdminMessages = supabase
         async (payload) => {
             const { user_id, message_text } = payload.new;
 
-            // Отправляем сообщение пользователю без привязки к предыдущему сообщению
+            // Отправляем сообщение пользователю
             bot.api.sendMessage(
                 user_id,
                 message_text,
@@ -160,9 +158,6 @@ bot.command('start', async (ctx) => {
     });
 });
 
-bot.hears('Пидарас', async (ctx) => {
-    await ctx.reply('Cам такой, дебил');
-});
 
 const userStates = {};
 
