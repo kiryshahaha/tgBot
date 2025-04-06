@@ -214,23 +214,23 @@ bot.on('message:text', async (ctx) => {
   
     // Если есть активное состояние
     if (userStates[userId]?.state) {
-      const { state } = userStates[userId];
-      
-      // Сохраняем сообщение
-      const { error } = await saveUserMessage(userId, `${state}: ${text}`, messageId);
-      
-      if (error) {
-        await ctx.reply("❌ Ошибка сохранения. Попробуйте еще раз.", {
-          reply_markup: getKeyboard(userId)
-        });
-      } else {
-        await ctx.reply("✅ Сообщение принято! Чем еще помочь?", {
-          reply_markup: getKeyboard(userId)
-        });
-        delete userStates[userId];
+        const { state } = userStates[userId];
+        
+        // Сохраняем сообщение
+        const { error } = await saveUserMessage(userId, `${state}: ${text}`, messageId);
+        
+        if (error) {
+          await ctx.reply("❌ Ошибка сохранения. Попробуйте еще раз.", {
+            reply_markup: getKeyboard(userId)
+          });
+        } else {
+          await ctx.reply("✅ Сообщение принято! Чем еще помочь?", {
+            reply_markup: getKeyboard(userId) // Вот здесь возвращаем обычную клавиатуру
+          });
+          delete userStates[userId]; // Удаляем состояние
+        }
+        return;
       }
-      return;
-    }
 
 
     // Обработка основных команд
