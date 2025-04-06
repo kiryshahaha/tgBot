@@ -138,34 +138,31 @@ const welcomeMessage = `
 const userStates = {};
 
 // Функция для получения динамической клавиатуры
-function getDynamicKeyboard(userId) {
+function getKeyboard(userId) {
     const keyboard = new Keyboard();
     
-    // Базовые кнопки (всегда доступны)
-    keyboard
-        .text("📞 Обратиться к поддержке").row()
-        .text("🛒 Где мой заказ?").row()
-        .text("🛒 Проблема с заказом").row()
-        .text("📜 Правила магазина и покупок").row()
-        .text("❓ Часто задаваемые вопросы").row();
-
-    // Если есть активное состояние — добавляем кнопку "Отменить"
+    // Если есть активное состояние - ТОЛЬКО кнопка "Отменить"
     if (userStates[userId]?.state) {
-        keyboard.text("🚫 Отменить").row();
-    } 
-    // Иначе — показываем дополнительные опции
-    else {
-        keyboard
-            .text("❓ Не нашел своего размера").row()
-            .text("👟 Не нашел нужную модель").row()
-            .text("📉 Хочу дешевле").row()
-            .text("🤝 Стать партнером").row()
-            .text("🐛 Нашел баг в приложении").row()
-            .text("💡 Предложить идею или улучшение").row();
+      keyboard.text("🚫 Отменить");
+      return keyboard.resized();
     }
-
+    
+    // Иначе - полная клавиатура
+    keyboard
+      .text("📞 Обратиться к поддержке").row()
+      .text("🛒 Где мой заказ?").row()
+      .text("🛒 Проблема с заказом").row()
+      .text("📜 Правила магазина и покупок").row()
+      .text("❓ Часто задаваемые вопросы").row()
+      .text("❓ Не нашел своего размера").row()
+      .text("👟 Не нашел нужную модель").row()
+      .text("📉 Хочу дешевле").row()
+      .text("🤝 Стать партнером").row()
+      .text("🐛 Нашел баг в приложении").row()
+      .text("💡 Предложить идею или улучшение");
+      
     return keyboard.resized();
-}
+  }
 
 // Функция для сохранения сообщений пользователя
 async function saveUserMessage(userId, messageText, messageId) {
@@ -196,7 +193,7 @@ async function getActiveOrders(userId) {
 bot.command('start', async (ctx) => {
     await ctx.reply(welcomeMessage, {
         parse_mode: 'Markdown',
-        reply_markup: getDynamicKeyboard(ctx.from.id)
+        reply_markup: getKeyboard(ctx.from.id)
     });
 });
 
@@ -205,49 +202,34 @@ bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const userId = ctx.from.id;
     const messageId = ctx.message.message_id;
-
-    // Обработка кнопки "Отменить" (работает только при активном состоянии)
+  
+    // Обработка отмены
     if (text === "🚫 Отменить" && userStates[userId]?.state) {
-        delete userStates[userId];
-        await ctx.reply("❌ Действие отменено. Выберите новую опцию.", {
-            reply_markup: getDynamicKeyboard(userId) // Возвращаем полную клавиатуру
-        });
-        return;
+      delete userStates[userId];
+      await ctx.reply("❌ Действие отменено. Что вас интересует?", {
+        reply_markup: getKeyboard(userId)
+      });
+      return;
     }
-
-    // Если у пользователя есть активное состояние (например, он пишет обращение в поддержку)
+  
+    // Если есть активное состояние
     if (userStates[userId]?.state) {
-        const { state } = userStates[userId];
-
-        // Запрещаем выбор других опций во время активного состояния
-        const forbiddenOptions = [
-            "❓ Не нашел своего размера",
-            "👟 Не нашел нужную модель",
-            "📉 Хочу дешевле",
-            "🤝 Стать партнером",
-            "🐛 Нашел баг в приложении",
-            "💡 Предложить идею или улучшение"
-        ];
-
-        if (forbiddenOptions.includes(text)) {
-            await ctx.reply("⚠️ Пожалуйста, завершите текущее обращение или нажмите *🚫 Отменить*.", {
-                parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
-            });
-            return;
-        }
-
-        // Сохраняем сообщение и сбрасываем состояние
-        const { error } = await saveUserMessage(userId, `${state}: ${text}`, messageId);
-        if (error) {
-            await ctx.reply("❌ Произошла ошибка при сохранении вашего обращения.");
-        } else {
-            await ctx.reply("✅ Ваше обращение зарегистрировано. Спасибо!", {
-                reply_markup: getDynamicKeyboard(userId)
-            });
-        }
-        delete userStates[userId]; // Сбрасываем состояние
-        return;
+      const { state } = userStates[userId];
+      
+      // Сохраняем сообщение
+      const { error } = await saveUserMessage(userId, `${state}: ${text}`, messageId);
+      
+      if (error) {
+        await ctx.reply("❌ Ошибка сохранения. Попробуйте еще раз.", {
+          reply_markup: getKeyboard(userId)
+        });
+      } else {
+        await ctx.reply("✅ Сообщение принято! Чем еще помочь?", {
+          reply_markup: getKeyboard(userId)
+        });
+        delete userStates[userId];
+      }
+      return;
     }
 
 
@@ -257,14 +239,14 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "найден баг" };
             await ctx.reply("🪲 Опишите баг (например: *«При нажатии на кнопку X происходит Y»*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId) // Клавиатура с кнопкой "Отменить"
+                reply_markup: getKeyboard(userId) // Клавиатура с кнопкой "Отменить"
             });
             break;
 
         case "📞 Обратиться к поддержке":
             userStates[userId] = { state: "обращение в поддержку" };
             await ctx.reply("📩 Напишите ваше сообщение для поддержки:", {
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -272,7 +254,7 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "проблема с заказом" };
             await ctx.reply("❓ Опишите проблему (например: *«Заказ не пришел»* или *«Товар поврежден»*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -280,7 +262,7 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "хочу дешевле" };
             await ctx.reply("💸 Напишите в формате:\n*ID товара; нужный размер* (например: *12345; 42*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -288,7 +270,7 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "стать партнером" };
             await ctx.reply("🤝 Опишите ваше предложение (например: *«Хочу продвигать ваш магазин»*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -296,7 +278,7 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "не нашел размера" };
             await ctx.reply("👟 Отправьте *ID товара и нужный размер* (например: *12345; 44*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -304,7 +286,7 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "не нашел модели" };
             await ctx.reply("🔍 Опишите модель (например: *«Nike Dunk Low Panda»*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -312,21 +294,21 @@ bot.on('message:text', async (ctx) => {
             userStates[userId] = { state: "предложение улучшения" };
             await ctx.reply("💡 Напишите вашу идею (например: *«Добавьте фильтр по цвету»*):", {
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
         case "📜 Правила магазина и покупок":
             await ctx.reply(shopRules, { 
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
         case "❓ Часто задаваемые вопросы":
             await ctx.reply(faq, { 
                 parse_mode: 'Markdown',
-                reply_markup: getDynamicKeyboard(userId)
+                reply_markup: getKeyboard(userId)
             });
             break;
 
@@ -338,7 +320,7 @@ bot.on('message:text', async (ctx) => {
                 
                 if (data.length === 0) {
                     await ctx.reply("😢 У вас нет активных заказов!\nЗагляните в наш магазин - возможно, вас что-то заинтересует 😊", {
-                        reply_markup: getDynamicKeyboard(userId)
+                        reply_markup: getKeyboard(userId)
                     });
                     return;
                 }
@@ -356,13 +338,13 @@ bot.on('message:text', async (ctx) => {
                     '🙏 Пожалуйста, не забывайте оставлять отзывы после получения заказов',
                     { 
                         parse_mode: 'Markdown',
-                        reply_markup: getDynamicKeyboard(userId)
+                        reply_markup: getKeyboard(userId)
                     }
                 );
             } catch (error) {
                 console.error('Order check error:', error);
                 await ctx.reply("⚠️ Произошла ошибка при получении информации о заказах. Попробуйте позже.", {
-                    reply_markup: getDynamicKeyboard(userId)
+                    reply_markup: getKeyboard(userId)
                 });
             }
             break;
@@ -371,7 +353,7 @@ bot.on('message:text', async (ctx) => {
             const { error } = await saveUserMessage(userId, text, messageId);
             if (error) {
                 await ctx.reply("⚠️ Произошла ошибка при обработке вашего сообщения.", {
-                    reply_markup: getDynamicKeyboard(userId)
+                    reply_markup: getKeyboard(userId)
                 });
             }
             break;
