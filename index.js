@@ -3,7 +3,6 @@ const { Bot, Keyboard } = require('grammy');
 const { createClient } = require('@supabase/supabase-js');
 
 const bot = new Bot(process.env.BOT_API_KEY);
-
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // Подписка на изменения в таблице orders
@@ -45,8 +44,6 @@ const subscriptionAdminMessages = supabase
         { event: 'INSERT', schema: 'public', table: 'admin_messages' },
         async (payload) => {
             const { user_id, message_text } = payload.new;
-
-            // Отправляем сообщение пользователю
             bot.api.sendMessage(
                 user_id,
                 message_text,
@@ -137,30 +134,36 @@ const welcomeMessage = `
 Если возникнут вопросы, всегда можно написать в поддержку – *мы на связи! 🚀*
 `;
 
-const customKeyboard = new Keyboard()
-    .text("📞 Обратиться к поддержке").row()
-    .text("❓ Не нашел своего размера").row()
-    .text("👟 Не нашел нужную модель").row()
-    .text("📉 Хочу дешевле").row()
-    .text("🛒 Где мой заказ?").row()
-    .text("🛒 Проблема с заказом").row()
-    .text("🤝 Стать партнером").row()
-    .text("🐛 Нашел баг в приложении").row()
-    .text("💡 Предложить идею или улучшение").row()
-    .text("📜 Правила магазина и покупок").row()
-    .text("❓ Часто задаваемые вопросы").row()
-    .resized();
-
-bot.command('start', async (ctx) => {
-    await ctx.reply(welcomeMessage, {
-        parse_mode: 'Markdown',
-        reply_markup: customKeyboard
-    });
-});
-
-
+// Объект для хранения состояний пользователей
 const userStates = {};
 
+// Функция для получения динамической клавиатуры
+function getDynamicKeyboard(userId) {
+    const keyboard = new Keyboard();
+    
+    // Базовые кнопки, доступные всегда
+    keyboard
+        .text("📞 Обратиться к поддержке").row()
+        .text("🛒 Где мой заказ?").row()
+        .text("🛒 Проблема с заказом").row()
+        .text("📜 Правила магазина и покупок").row()
+        .text("❓ Часто задаваемые вопросы").row();
+
+    // Добавляем дополнительные кнопки только если нет активного состояния
+    if (!userStates[userId]?.state) {
+        keyboard
+            .text("❓ Не нашел своего размера").row()
+            .text("👟 Не нашел нужную модель").row()
+            .text("📉 Хочу дешевле").row()
+            .text("🤝 Стать партнером").row()
+            .text("🐛 Нашел баг в приложении").row()
+            .text("💡 Предложить идею или улучшение").row();
+    }
+
+    return keyboard.resized();
+}
+
+// Функция для сохранения сообщений пользователя
 async function saveUserMessage(userId, messageText, messageId) {
     const { data, error } = await supabase
         .from('user_messages')
@@ -173,152 +176,183 @@ async function saveUserMessage(userId, messageText, messageId) {
     return { data, error };
 }
 
+// Функция для получения активных заказов
+async function getActiveOrders(userId) {
+    const { data, error } = await supabase
+        .from('orders')
+        .select('id, status, created_at')
+        .eq('user_id', userId)
+        .neq('status', 'выполнено')
+        .order('created_at', { ascending: false });
+
+    return { data, error };
+}
+
+// Обработчик команды /start
+bot.command('start', async (ctx) => {
+    await ctx.reply(welcomeMessage, {
+        parse_mode: 'Markdown',
+        reply_markup: getDynamicKeyboard(ctx.from.id)
+    });
+});
+
+// Обработчик текстовых сообщений
 bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const userId = ctx.from.id;
     const messageId = ctx.message.message_id;
 
+    // Если у пользователя есть активное состояние
     if (userStates[userId]?.state) {
         const { state } = userStates[userId];
 
-        if (state !== 'awaiting_order_number') {
-            const { error } = await saveUserMessage(userId, `${state}: ${text}`, messageId);
+        // Запрещаем выбор других опций во время активного состояния
+        const forbiddenOptions = [
+            "❓ Не нашел своего размера",
+            "👟 Не нашел нужную модель",
+            "📉 Хочу дешевле",
+            "🤝 Стать партнером",
+            "🐛 Нашел баг в приложении",
+            "💡 Предложить идею или улучшение"
+        ];
 
-            if (error) {
-                await ctx.reply("Произошла ошибка при сохранении вашего обращения.");
-            } else {
-                await ctx.reply("Ваше обращение зарегистрировано. Спасибо!");
-            }
-
-            delete userStates[userId];
+        if (forbiddenOptions.includes(text)) {
+            await ctx.reply("Пожалуйста, завершите текущее обращение перед выбором новой опции.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             return;
         }
+
+        // Обработка текущего состояния
+        const { error } = await saveUserMessage(userId, `${state}: ${text}`, messageId);
+
+        if (error) {
+            await ctx.reply("Произошла ошибка при сохранении вашего обращения.");
+        } else {
+            await ctx.reply("Ваше обращение зарегистрировано. Спасибо!", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
+        }
+
+        delete userStates[userId];
+        return;
     }
 
-    // if (userStates[userId]?.state === 'awaiting_order_number') {
-    //     const { data, error } = await supabase
-    //         .from('orders')
-    //         .select('status, id')
-    //         .eq('user_id', userId)
-    //         .eq('id', orderId);
-
-    //     if (error) {
-    //         await ctx.reply("Произошла ошибка при поиске ваших заказов.");
-    //     } else if (data.length === 0) {
-    //         await ctx.reply("Вы еще не сделали заказ. \nВы можете это сделать в нашем мини-приложении (доступно по нажатию на синюю иконку 'shop', слева от ввода сообщения. Спасибо, что выбрали SneakPick❤️");
-    //     } else {
-    //         const completedOrders = data.filter(order => order.status === 'выполнено');
-    //         const activeOrders = data.filter(order => order.status !== 'выполнено');
-
-    //         if (activeOrders.length > 0) {
-    //             const activeStatuses = activeOrders.map(order => `Статус вашего заказа (ID: ${order.id}): ${order.status}`).join('; ');
-    //             await ctx.reply(`${activeStatuses}. Также не забудьте оставить отзыв об уже выполненных заказах. \nСпасибо, что выбрали SneakPick❤️`);
-    //         } else if (completedOrders.length > 0) {
-    //             await ctx.reply("У вас нет активных заказов. Пожалуйста, не забудьте написать отзыв о полученных товарах. \nСпасибо, что выбрали SneakPick❤️️");
-    //         } else {
-    //             await ctx.reply("Ваши заказы находятся в обработке. \nСпасибо, что выбрали SneakPick❤️");
-    //         }
-    //     }
-
-    //     delete userStates[userId];
-    //     return;
-    // }
-
-    async function getActiveOrders(userId) {
-        const { data, error } = await supabase
-            .from('orders')
-            .select('id, status, created_at')
-            .eq('user_id', userId)
-            .neq('status', 'выполнено')
-            .order('created_at', { ascending: false });
-    
-        return { data, error };
-    }
-
+    // Обработка основных команд
     switch (text) {
         case "🐛 Нашел баг в приложении":
-            await ctx.reply("Пожалуйста, опишите баг.");
+            await ctx.reply("Пожалуйста, опишите баг.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "найден баг" };
             break;
 
         case "📞 Обратиться к поддержке":
-            await ctx.reply("Пожалуйста, напишите ваше обращение.");
+            await ctx.reply("Пожалуйста, напишите ваше обращение.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "обращение в поддержку" };
             break;
 
         case "🛒 Проблема с заказом":
-            await ctx.reply("Опишите, с какой проблемой вы столкнулись.");
+            await ctx.reply("Опишите, с какой проблемой вы столкнулись.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "проблема с заказом" };
             break;
 
         case "📉 Хочу дешевле":
-            await ctx.reply('Пожалуйста, напишите сообщение в виде: "ID товара (указывается в карточке товара под описанием); размер, который вам необходим."');
+            await ctx.reply('Пожалуйста, напишите сообщение в виде: "ID товара (указывается в карточке товара под описанием); размер, который вам необходим."', {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "хочу дешевле" };
             break;
 
         case "🤝 Стать партнером":
-            await ctx.reply("Опишите ваше предложение в следующем сообщении.");
+            await ctx.reply("Опишите ваше предложение в следующем сообщении.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "стать партнером" };
             break;
 
         case "❓ Не нашел своего размера":
-            await ctx.reply("Вам необходимо скинуть id товара (находится под описанием) и размер, который вас интересует. Также размер стоит выбирать по таблице с последнего фото товара.");
+            await ctx.reply("Вам необходимо скинуть id товара (находится под описанием) и размер, который вас интересует. Размер стоит выбирать по таблице с последнего фото товара.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "не нашел размера" };
             break;
 
         case "👟 Не нашел нужную модель":
-            await ctx.reply("Опишите, какую модель вы ищете - название и расцветка/ссылка на Poizon или любой другой маркетплейс");
+            await ctx.reply("Опишите, какую модель вы ищете - название и расцветка/ссылка на Poizon или любой другой маркетплейс", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "не нашел модели" };
             break;
 
         case "💡 Предложить идею или улучшение":
-            await ctx.reply("Опишите ваше предложение для улучшения.");
+            await ctx.reply("Опишите ваше предложение для улучшения.", {
+                reply_markup: getDynamicKeyboard(userId)
+            });
             userStates[userId] = { state: "предложение улучшения" };
             break;
 
         case "📜 Правила магазина и покупок":
-            await ctx.reply(shopRules, { parse_mode: 'Markdown' });
+            await ctx.reply(shopRules, { 
+                parse_mode: 'Markdown',
+                reply_markup: getDynamicKeyboard(userId)
+            });
             break;
 
         case "❓ Часто задаваемые вопросы":
-            await ctx.reply(faq, { parse_mode: 'Markdown' });
+            await ctx.reply(faq, { 
+                parse_mode: 'Markdown',
+                reply_markup: getDynamicKeyboard(userId)
+            });
             break;
 
         case "🛒 Где мой заказ?":
-                try {
-                    const { data, error } = await getActiveOrders(ctx.from.id);
-                    
-                    if (error) throw error;
-                    
-                    if (data.length === 0) {
-                        await ctx.reply("😢 У вас нет активных заказов!\nЗагляните в наш магазин - возможно, вас что-то заинтересует 😊");
-                        return;
-                    }
-            
-                    const ordersList = data.map((order, index) => 
-                        `📦 *Заказ #${index + 1}*\n` +
-                        `🆔 ID: ${order.id}\n` +
-                        `📊 Статус: ${order.status}\n` +
-                        `📅 Дата: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`
-                    ).join('\n\n');
-            
-                    await ctx.reply(
-                        `📬 *Ваши активные заказы:*\n\n${ordersList}\n\n` +
-                        `ℹ️ Обновления статусов будут приходить автоматически.\n` +
-                        '🙏 Пожалуйста, не забывайте оставлять отзывы после получения заказов',
-                        { parse_mode: 'Markdown' }
-                    );
-                } catch (error) {
-                    console.error('Order check error:', error);
-                    await ctx.reply("⚠️ Произошла ошибка при получении информации о заказах. Попробуйте позже.");
+            try {
+                const { data, error } = await getActiveOrders(userId);
+                
+                if (error) throw error;
+                
+                if (data.length === 0) {
+                    await ctx.reply("😢 У вас нет активных заказов!\nЗагляните в наш магазин - возможно, вас что-то заинтересует 😊", {
+                        reply_markup: getDynamicKeyboard(userId)
+                    });
+                    return;
                 }
-                break;
-
+        
+                const ordersList = data.map((order, index) => 
+                    `📦 *Заказ #${index + 1}*\n` +
+                    `🆔 ID: ${order.id}\n` +
+                    `📊 Статус: ${order.status}\n` +
+                    `📅 Дата: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`
+                ).join('\n\n');
+        
+                await ctx.reply(
+                    `📬 *Ваши активные заказы:*\n\n${ordersList}\n\n` +
+                    `ℹ️ Обновления статусов будут приходить автоматически.\n` +
+                    '🙏 Пожалуйста, не забывайте оставлять отзывы после получения заказов',
+                    { 
+                        parse_mode: 'Markdown',
+                        reply_markup: getDynamicKeyboard(userId)
+                    }
+                );
+            } catch (error) {
+                console.error('Order check error:', error);
+                await ctx.reply("⚠️ Произошла ошибка при получении информации о заказах. Попробуйте позже.", {
+                    reply_markup: getDynamicKeyboard(userId)
+                });
+            }
+            break;
 
         default:
             const { error } = await saveUserMessage(userId, text, messageId);
             if (error) {
-                await ctx.reply("Произошла ошибка при обработке вашего сообщения.");
+                await ctx.reply("⚠️ Произошла ошибка при обработке вашего сообщения.", {
+                    reply_markup: getDynamicKeyboard(userId)
+                });
             }
             break;
     }
