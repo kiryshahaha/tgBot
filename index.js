@@ -5,21 +5,51 @@ const { createClient } = require('@supabase/supabase-js');
 const bot = new Bot(process.env.BOT_API_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// Список ID админов (добавьте свои Telegram ID)
+const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
+
+// Функция для уведомления админов
+async function notifyAdmins(message) {
+    if (ADMIN_IDS.length === 0) {
+        console.warn("Не указаны ID админов для уведомлений");
+        return;
+    }
+
+    const promises = ADMIN_IDS.map(adminId => 
+        bot.api.sendMessage(adminId, message, { parse_mode: 'Markdown' })
+            .catch(error => {
+                console.error(`Ошибка при отправке уведомления админу ${adminId}:`, error.message);
+            })
+    );
+
+    await Promise.all(promises);
+}
+
 // Подписка на изменения в таблице orders
 const subscriptionOrders = supabase
     .channel('custom-insert-channel')
     .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'orders' },
-        (payload) => {
+        async (payload) => {
             const { id, status, user_id } = payload.new;
-            bot.api.sendMessage(
+            
+            // Уведомление пользователя
+            await bot.api.sendMessage(
                 user_id,
                 `Спасибо, что выбрали *SneakPick*. \nВашему заказу: \n*${id}*\nприсвоен новый статус: *${status}*. \nВ ближайшее время администратор свяжется с вами для уточнения адреса доставки и итоговой стоимости заказа.`,
                 { parse_mode: 'Markdown' }
             ).catch(error => {
                 console.error("Ошибка при отправке сообщения:", error.message);
             });
+            
+            // Уведомление админов
+            await notifyAdmins(
+                `🆕 *Новый заказ!*\n\n` +
+                `🆔 ID заказа: *${id}*\n` +
+                `👤 ID пользователя: *${user_id}*\n` +
+                `📊 Статус: *${status}*`
+            );
         }
     )
     .subscribe();
@@ -30,8 +60,17 @@ const subscriptionUserMessages = supabase
     .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'user_messages' },
-        (payload) => {
+        async (payload) => {
+            const { user_id, message_text, message_id } = payload.new;
             console.log('Новое сообщение от пользователя:', payload.new);
+            
+            // Уведомление админов
+            await notifyAdmins(
+                `📩 *Новое сообщение от пользователя*\n\n` +
+                `👤 ID пользователя: *${user_id}*\n` +
+                `📝 Сообщение: *${message_text}*\n` +
+                `🆔 ID сообщения: *${message_id}*`
+            );
         }
     )
     .subscribe();
